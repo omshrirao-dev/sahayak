@@ -12,6 +12,16 @@ export * from "./events/eventStore.js";
 export * from "./state-machine/careStage.js";
 export * from "./state-machine/riskLevel.js";
 export * from "./state-machine/engagement.js";
+export * from "./agents/actionSchema.js";
+export * from "./agents/agentTypes.js";
+export * from "./agents/orchestrator.js";
+export * from "./agents/checkInAgent.js";
+export * from "./agents/patternFlagAgent.js";
+export * from "./agents/escalationAgent.js";
+export * from "./actions/actionStateMachine.js";
+export * from "./actions/idempotency.js";
+export * from "./actions/overrideMemory.js";
+export * from "./safety/safetyClient.js";
 
 export interface Patient {
   id: string;

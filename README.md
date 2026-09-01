@@ -9,7 +9,7 @@ AI agents act as coworkers to clinicians, not chatbots.
 See [`Sahayak_Spec.md`](./Sahayak_Spec.md) for the full specification, architectural
 decisions, and the 8 edge cases this system is built to handle explicitly.
 
-## Status: Phase 2 — Python Safety Service
+## Status: Phase 3 — Agent Orchestration + Action System
 
 Implemented so far:
 
@@ -31,6 +31,16 @@ Implemented so far:
   - `app/training_data.py` — 260 synthetic labeled examples across all four classifiers
   - `app/main.py` — FastAPI app; `POST /safety/verify-action` is the combined endpoint the Node core calls per proposed action
   - `tests/` — 28 passing tests, including the sarcasm/subtle-crisis/injection/contradiction edge cases from spec Section 4.3
+- `core/src/agents/` — allow-list + orchestration
+  - `actionSchema.ts` — the LOW/MEDIUM/HIGH allow-list for every action type; unclassified types default to HIGH; a hard blocklist (diagnose, adjust medication, autonomous discharge, contact emergency services) is never autonomous regardless of tier
+  - `orchestrator.ts` — routes events → agents → tier resolution (including override-driven downgrades) → safety verification → action lifecycle; the only place allowed to decide whether an action actually executes
+  - `checkInAgent.ts` (LOW), `patternFlagAgent.ts` (MEDIUM), `escalationAgent.ts` (HIGH) — three example agents
+- `core/src/actions/` — action lifecycle infrastructure
+  - `actionStateMachine.ts` — `proposed → approved → executing → completed / superseded / cancelled`, with a `supersedeAllInFlightForPatient()` hook for Edge Case 5
+  - `idempotency.ts` — idempotency-keyed execution that verifies current state before ever retrying (Edge Case 6)
+  - `overrideMemory.ts` — permanent per-(patient, action type) override history (Edge Case 8) driving the self-correcting MEDIUM→HIGH downgrade rule after 2 consecutive overrides
+- `core/src/safety/safetyClient.ts` — typed client for the Python safety service's `/safety/verify-action`; fails closed if the service is unreachable
+- `core/tests/` — 59 passing tests total, including full action-lifecycle, tier-enforcement, safety-integration, supersession, and override/downgrade scenarios
 
 ## Setup
 
@@ -53,6 +63,7 @@ python -m uvicorn app.main:app --reload    # run the API locally
 
 ## Not yet built
 
-Agent orchestration/action system, full edge-case handling, evaluation
-harness, clinician dashboard, and docs — see `Sahayak_Spec.md` Section 8
+Full edge-case handling (Phase 3 covers Edge Cases 5, 6, and 8; Edge Cases
+1-4 and 7 are still Phase 4 work), evaluation harness, clinician dashboard,
+and docs — see `Sahayak_Spec.md` Section 8
 for the remaining build phases.
