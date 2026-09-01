@@ -25,6 +25,14 @@ const MISSED_CHECK_IN_WATCH_THRESHOLD = 2;
 export interface RiskLevelResult {
   riskLevel: RiskLevel;
   reasons: string[];
+  /**
+   * Ids of the specific events that produced this verdict. Agents
+   * that base a proposed action on this result should pass these
+   * through as the action's `sourceEventIds` so the orchestrator's
+   * Edge Case 3 freshness gate can check them before letting a
+   * MEDIUM/HIGH-tier action execute.
+   */
+  contributingEventIds: string[];
 }
 
 /**
@@ -40,6 +48,7 @@ function isStale(event: BaseEvent, now: Date): boolean {
 
 export function computeRiskLevel(events: BaseEvent[], now: Date = new Date()): RiskLevelResult {
   const reasons: string[] = [];
+  const contributingEventIds = new Set<string>();
 
   // 1. Unresolved crisis flags always win -- highest priority,
   //    independent of staleness rules.
@@ -54,7 +63,7 @@ export function computeRiskLevel(events: BaseEvent[], now: Date = new Date()): R
       const p = f.payload as unknown as CrisisFlagRaisedPayload;
       reasons.push(`Unresolved crisis flag (${p.severity}): ${p.reason}`);
     }
-    return { riskLevel: "Crisis", reasons };
+    return { riskLevel: "Crisis", reasons, contributingEventIds: unresolvedFlags.map((f) => f.id) };
   }
 
   // 2. Declining/low mood-score streak (most recent N check-ins).
@@ -77,6 +86,7 @@ export function computeRiskLevel(events: BaseEvent[], now: Date = new Date()): R
       `Mood-score pattern over last ${DECLINE_STREAK_THRESHOLD} check-ins: ` +
         recentCheckIns.map((e) => (e.payload as unknown as CheckInSubmittedPayload).moodScore).join(", "),
     );
+    for (const e of recentCheckIns) contributingEventIds.add(e.id);
   }
 
   // 3. Clinician-flagged decline (only if not stale -- Edge Case 3).
@@ -88,19 +98,21 @@ export function computeRiskLevel(events: BaseEvent[], now: Date = new Date()): R
     !!latestNote && (latestNote.payload as unknown as ClinicianNoteAddedPayload).clinicianAssessment === "declining";
   if (clinicianFlaggedDecline) {
     reasons.push("Most recent clinician note flags decline");
+    contributingEventIds.add(latestNote!.id);
   }
 
   // 4. Missed check-ins.
-  const missedCount = events.filter(
+  const missedCheckIns = events.filter(
     (e) => e.eventType === "CHECK_IN_MISSED" && !isStale(e, now),
-  ).length;
-  if (missedCount >= MISSED_CHECK_IN_WATCH_THRESHOLD) {
-    reasons.push(`${missedCount} missed check-ins`);
+  );
+  if (missedCheckIns.length >= MISSED_CHECK_IN_WATCH_THRESHOLD) {
+    reasons.push(`${missedCheckIns.length} missed check-ins`);
+    for (const e of missedCheckIns) contributingEventIds.add(e.id);
   }
 
   if (reasons.length > 0) {
-    return { riskLevel: "Watch", reasons };
+    return { riskLevel: "Watch", reasons, contributingEventIds: [...contributingEventIds] };
   }
 
-  return { riskLevel: "Stable", reasons: ["No decline signals in event stream"] };
+  return { riskLevel: "Stable", reasons: ["No decline signals in event stream"], contributingEventIds: [] };
 }

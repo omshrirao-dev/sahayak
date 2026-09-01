@@ -63,6 +63,22 @@ export interface VerifyActionResult {
 
 export interface SafetyClient {
   verifyAction(input: VerifyActionInput): Promise<VerifyActionResult>;
+  /**
+   * Standalone crisis check (POST /safety/crisis). Used by the
+   * orchestrator to run the classifier independently on EVERY
+   * inbound patient message (Edge Case 1) -- separate from
+   * verifyAction, which only checks crisis language when an agent
+   * happens to attach inbound_patient_text to its own proposal.
+   */
+  checkCrisis(text: string): Promise<CrisisCheckResult>;
+  /**
+   * Standalone contradiction check (POST /safety/contradiction).
+   * Used by agents that need to know a contradiction verdict WITHOUT
+   * it blocking their own action via verifyAction's contradiction_check
+   * field (Edge Case 4) -- e.g. the dedicated contradiction-flagging
+   * agent, which must always execute in order to surface what it found.
+   */
+  checkContradiction(sourceA: string, sourceB: string): Promise<ContradictionCheckResult>;
 }
 
 export class SafetyServiceUnavailableError extends Error {
@@ -82,22 +98,35 @@ export class SafetyServiceUnavailableError extends Error {
 export class HttpSafetyClient implements SafetyClient {
   constructor(private baseUrl: string = "http://localhost:8000") {}
 
-  async verifyAction(input: VerifyActionInput): Promise<VerifyActionResult> {
+  private async post<T>(path: string, body: unknown): Promise<T> {
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/safety/verify-action`, {
+      response = await fetch(`${this.baseUrl}${path}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
+        body: JSON.stringify(body),
       });
     } catch (err) {
       throw new SafetyServiceUnavailableError(err);
     }
     if (!response.ok) {
-      throw new SafetyServiceUnavailableError(
-        `HTTP ${response.status} ${response.statusText}`,
-      );
+      throw new SafetyServiceUnavailableError(`HTTP ${response.status} ${response.statusText}`);
     }
-    return (await response.json()) as VerifyActionResult;
+    return (await response.json()) as T;
+  }
+
+  verifyAction(input: VerifyActionInput): Promise<VerifyActionResult> {
+    return this.post<VerifyActionResult>("/safety/verify-action", input);
+  }
+
+  checkCrisis(text: string): Promise<CrisisCheckResult> {
+    return this.post<CrisisCheckResult>("/safety/crisis", { text });
+  }
+
+  checkContradiction(sourceA: string, sourceB: string): Promise<ContradictionCheckResult> {
+    return this.post<ContradictionCheckResult>("/safety/contradiction", {
+      source_a: sourceA,
+      source_b: sourceB,
+    });
   }
 }

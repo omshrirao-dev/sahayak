@@ -18,6 +18,7 @@ export const EVENT_TYPES = [
   "ASSESSMENT_COMPLETED",
   "ENGAGEMENT_PING_SENT",
   "ENGAGEMENT_PING_RESPONDED",
+  "FACT_RECONFIRMED",
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];
@@ -60,9 +61,10 @@ export interface CheckInMissedPayload {
 export interface PatientMessageReceivedPayload {
   text: string;
   /**
-   * Set by the Python safety service's crisis classifier
-   * (Edge Case 1/2). Independent of any agent's own read of the
-   * message -- see safety/safetyClient.ts in Phase 3.
+   * Set by the orchestrator itself (Phase 4), which runs the
+   * independent crisis-language classifier on EVERY inbound message
+   * unconditionally -- not by an agent's own judgment call. See
+   * Orchestrator.handleEvent()'s crisis-check block and Edge Case 1.
    */
   crisisClassifierFlag?: boolean;
 }
@@ -98,4 +100,18 @@ export interface CareStageTransitionRequestedPayload {
 
 export interface EngagementPingRespondedPayload {
   pingEventId: string;
+}
+
+/**
+ * Edge Case 3 (memory drift): an explicit, human-originated
+ * confirmation that a specific older fact is still accurate.
+ * Reconfirmation is itself a new event (event sourcing -- we never
+ * mutate the original), and staleness.ts uses the most recent
+ * reconfirmation's timestamp as the freshness reference point
+ * instead of the original event's age.
+ */
+export interface FactReconfirmedPayload {
+  originalEventId: string;
+  confirmedBy: string;
+  note?: string;
 }

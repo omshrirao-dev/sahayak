@@ -27,6 +27,9 @@ export const patternFlagAgent: Agent = {
         payload: { patientId, riskReasons: risk.reasons },
         reason: `risk_level computed as Watch: ${risk.reasons.join("; ")}`,
         draftedText: `Pattern flag: ${risk.reasons.join("; ")}`,
+        // Edge Case 3: lets the orchestrator gate this action on
+        // whether the events that produced "Watch" are still fresh.
+        sourceEventIds: risk.contributingEventIds,
       },
     ];
   },

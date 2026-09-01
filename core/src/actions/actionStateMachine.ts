@@ -59,6 +59,13 @@ export class ActionInstance {
   readonly idempotencyKey: string;
   readonly requiresImmediateEscalation: boolean;
   flaggedForReview: boolean;
+  /**
+   * Set by the orchestrator when it blocks this action from
+   * executing despite its tier -- e.g. stale source facts (Edge
+   * Case 3) or a safety-service "unsafe" verdict. Absent when the
+   * action executed normally.
+   */
+  blockRecord: { reason: "stale_facts" | "safety_service"; details: string[] } | null = null;
   status: ActionStatus = "proposed";
   result: unknown = undefined;
   readonly history: ActionHistoryEntry[];

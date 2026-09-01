@@ -1,14 +1,20 @@
 import type { World } from "../index.js";
-import type { BaseEvent } from "../events/eventTypes.js";
+import type { BaseEvent, PatientMessageReceivedPayload } from "../events/eventTypes.js";
 import { ActionInstance, ActionRegistry } from "../actions/actionStateMachine.js";
 import { IdempotencyStore } from "../actions/idempotency.js";
 import { OverrideMemory } from "../actions/overrideMemory.js";
+import { TriageQueue } from "../actions/triageQueue.js";
+import { checkFactFreshness } from "../state-machine/staleness.js";
+import { reconfirmFact as reconfirmFactEvent } from "../state-machine/staleness.js";
+import { PHIAccessControl } from "../safety/phiAccessControl.js";
+import { AuditLog } from "../safety/auditLog.js";
 import type { SafetyClient } from "../safety/safetyClient.js";
 import { getActionDefinition, type ActionTier } from "./actionSchema.js";
 import type { Agent, ProposedActionDraft } from "./agentTypes.js";
 import { checkInAgent } from "./checkInAgent.js";
 import { patternFlagAgent } from "./patternFlagAgent.js";
 import { escalationAgent } from "./escalationAgent.js";
+import { createContradictionAgent } from "./contradictionAgent.js";
 
 export type ActionExecutor = (action: ActionInstance) => Promise<unknown>;
 
@@ -22,6 +28,9 @@ export interface OrchestratorDeps {
   actionRegistry?: ActionRegistry;
   overrideMemory?: OverrideMemory;
   idempotencyStore?: IdempotencyStore;
+  triageQueue?: TriageQueue;
+  phiAccessControl?: PHIAccessControl;
+  auditLog?: AuditLog;
   agents?: Agent[];
   executors?: Record<string, ActionExecutor>;
 }
@@ -37,6 +46,9 @@ export class Orchestrator {
   private safetyClient: SafetyClient;
   readonly actionRegistry: ActionRegistry;
   readonly overrideMemory: OverrideMemory;
+  readonly triageQueue: TriageQueue;
+  readonly phiAccessControl: PHIAccessControl;
+  readonly auditLog: AuditLog;
   private idempotencyStore: IdempotencyStore;
   private agents: Agent[];
   private executors: Record<string, ActionExecutor>;
@@ -48,8 +60,16 @@ export class Orchestrator {
     this.actionRegistry = deps.actionRegistry ?? new ActionRegistry();
     this.overrideMemory = deps.overrideMemory ?? new OverrideMemory();
     this.idempotencyStore = deps.idempotencyStore ?? new IdempotencyStore();
-    this.agents = deps.agents ?? [checkInAgent, patternFlagAgent, escalationAgent];
+    this.triageQueue = deps.triageQueue ?? new TriageQueue();
+    this.phiAccessControl = deps.phiAccessControl ?? new PHIAccessControl();
+    this.auditLog = deps.auditLog ?? new AuditLog(this.phiAccessControl);
     this.executors = deps.executors ?? {};
+    this.agents = deps.agents ?? [
+      checkInAgent,
+      patternFlagAgent,
+      escalationAgent,
+      createContradictionAgent(this.safetyClient),
+    ];
   }
 
   /**
@@ -72,6 +92,47 @@ export class Orchestrator {
   }
 
   async handleEvent(event: BaseEvent): Promise<ActionInstance[]> {
+    const created: ActionInstance[] = [];
+
+    // Edge Case 1 (crisis false negative): a dedicated, conservative
+    // classifier runs on EVERY inbound patient message, unconditionally
+    // -- not gated on any agent deciding to check. This is what makes
+    // it a redundant safety net rather than a single point of failure.
+    if (event.eventType === "PATIENT_MESSAGE_RECEIVED") {
+      const payload = event.payload as unknown as PatientMessageReceivedPayload;
+      const crisisResult = await this.safetyClient.checkCrisis(payload.text);
+      if (crisisResult.is_crisis) {
+        const flagEvent = this.world.recordEvent({
+          patientId: event.patientId,
+          eventType: "CRISIS_FLAG_RAISED",
+          payload: {
+            severity: crisisResult.probability >= 0.9 ? "high" : "medium",
+            reason: crisisResult.reasoning,
+            raisedBy: "agent",
+          },
+          source: "agent",
+        });
+
+        // Edge Case 2 (false positives): route to the FAST triage
+        // queue for a quick confirm/dismiss, not straight into a
+        // full escalation review. We enqueue before recursing into
+        // handleEvent() so the queue entry exists even if downstream
+        // processing throws.
+        const nested = await this.handleEvent(flagEvent);
+        const escalation = nested.find((a) => a.actionType === "ESCALATE_CRISIS");
+        if (escalation) {
+          this.triageQueue.enqueue({
+            patientId: event.patientId,
+            crisisFlagEventId: flagEvent.id,
+            escalationActionId: escalation.id,
+            matchedPattern: crisisResult.matched_keyword,
+            probability: crisisResult.probability,
+          });
+        }
+        created.push(...nested);
+      }
+    }
+
     // Edge Case 5: a crisis flag is a HIGH-priority event. Supersede
     // every non-terminal action already in flight for this patient
     // BEFORE agents get a chance to propose anything new, so a
@@ -85,9 +146,8 @@ export class Orchestrator {
       );
     }
 
-    const created: ActionInstance[] = [];
     for (const agent of this.agents) {
-      const drafts = agent.evaluate(this.world, event.patientId, event);
+      const drafts = await agent.evaluate(this.world, event.patientId, event);
       for (const draft of drafts) {
         const action = await this.proposeAndRoute(agent.name, event.patientId, draft, event.id);
         if (action) created.push(action);
@@ -124,12 +184,34 @@ export class Orchestrator {
   }
 
   /**
+   * Edge Case 3 (memory drift): for a MEDIUM/HIGH-tier proposal that
+   * names its source facts, every one of them must be fresh (see
+   * state-machine/staleness.ts) before the action may execute. LOW
+   * tier is exempt -- those actions are routine/templated and don't
+   * lean on judgment calls about older facts.
+   */
+  private checkSourceFreshness(patientId: string, tier: ActionTier, sourceEventIds?: string[]): string[] {
+    if (tier === "LOW" || !sourceEventIds || sourceEventIds.length === 0) return [];
+    const patientEvents = this.world.store.getByPatient(patientId);
+    const staleNotes: string[] = [];
+    for (const id of sourceEventIds) {
+      const event = patientEvents.find((e) => e.id === id);
+      if (!event) continue; // nothing to check freshness of if the source event isn't found
+      const freshness = checkFactFreshness(event, patientEvents);
+      if (freshness.isStale) {
+        staleNotes.push(`Event ${id} is stale: ${freshness.reason}`);
+      }
+    }
+    return staleNotes;
+  }
+
+  /**
    * Turns one agent's proposal into a real ActionInstance, verifies
    * it with the safety service, and -- for LOW/MEDIUM tiers that
    * pass verification -- executes it immediately. HIGH-tier actions
-   * (and anything that fails safety verification, regardless of
-   * tier) stay in "proposed" and wait for approveAction()/
-   * overrideAction() from a human.
+   * (and anything that fails safety verification or freshness
+   * checks, regardless of tier) stay in "proposed" and wait for
+   * approveAction()/overrideAction() from a human.
    */
   async proposeAndRoute(
     agentName: string,
@@ -165,17 +247,31 @@ export class Orchestrator {
       requiresImmediateEscalation,
     });
 
+    // Edge Case 7: the reasoning behind this proposal is written to
+    // the same access-controlled, encrypted store as PHI -- never a
+    // plain console.log or an unguarded log line.
+    this.auditLog.writeReasoningTrace(patientId, agentName, draft.reason);
+
+    const staleFacts = this.checkSourceFreshness(patientId, tier, draft.sourceEventIds);
+    if (staleFacts.length > 0) {
+      action.flaggedForReview = true;
+      action.blockRecord = { reason: "stale_facts", details: staleFacts };
+      return action; // Edge Case 3: never execute on unconfirmed stale facts
+    }
+
     const safetyResult = await this.safetyClient.verifyAction({
       action_type: draft.actionType,
       tier,
       drafted_text: draft.draftedText,
       inbound_patient_text: draft.inboundPatientText,
+      contradiction_check: draft.contradictionCheck,
     });
 
     if (!safetyResult.safe_to_proceed) {
       // Never silently execute something the safety service flagged
       // -- regardless of tier, it stays "proposed" for a human.
       action.flaggedForReview = true;
+      action.blockRecord = { reason: "safety_service", details: safetyResult.blocking_reasons };
       return action;
     }
 
@@ -219,6 +315,34 @@ export class Orchestrator {
       action.cancel(reason, by);
     }
     return action;
+  }
+
+  /**
+   * Edge Case 3: records an explicit reconfirmation of a stale fact.
+   * Does not retroactively un-block any already-blocked action --
+   * the agent needs to re-propose (e.g. via a fresh handleEvent()
+   * call, or by re-running proposeAndRoute with the same draft),
+   * which will then find the fact fresh.
+   */
+  reconfirmFact(patientId: string, originalEventId: string, by: string, note?: string): ReturnType<typeof reconfirmFactEvent> {
+    return reconfirmFactEvent(this.world.store, patientId, originalEventId, by, note);
+  }
+
+  /** Edge Case 2: clinician confirms a fast-triage crisis flag was a genuine positive -- the drafted escalation proceeds. */
+  async confirmCrisisFlag(triageItemId: string, by: string): Promise<ActionInstance> {
+    const item = this.triageQueue.confirm(triageItemId, by);
+    return this.approveAction(item.escalationActionId, by);
+  }
+
+  /** Edge Case 2: clinician dismisses a fast-triage crisis flag as a false positive -- recorded per-pattern for recalibration. */
+  dismissCrisisFlag(triageItemId: string, by: string, note = "Dismissed as false positive via fast triage"): ActionInstance {
+    const item = this.triageQueue.dismiss(triageItemId, by);
+    return this.overrideAction(item.escalationActionId, by, note);
+  }
+
+  /** Edge Case 7: reads a reasoning trace under the same access control as the underlying patient record. */
+  readReasoningTrace(entryId: string, requesterId: string): string {
+    return this.auditLog.readReasoningTrace(entryId, requesterId);
   }
 
   private requireAction(actionId: string): ActionInstance {

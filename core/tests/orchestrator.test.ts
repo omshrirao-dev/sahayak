@@ -2,29 +2,7 @@ import { describe, it, expect } from "vitest";
 import { World } from "../src/index.js";
 import { Orchestrator } from "../src/agents/orchestrator.js";
 import type { Agent, ProposedActionDraft } from "../src/agents/agentTypes.js";
-import type { SafetyClient, VerifyActionInput, VerifyActionResult } from "../src/safety/safetyClient.js";
-
-class FakeSafetyClient implements SafetyClient {
-  calls: VerifyActionInput[] = [];
-  private safeOverride: boolean | null = null;
-
-  setSafe(safe: boolean) {
-    this.safeOverride = safe;
-  }
-
-  async verifyAction(input: VerifyActionInput): Promise<VerifyActionResult> {
-    this.calls.push(input);
-    const safe = this.safeOverride ?? true;
-    return {
-      safe_to_proceed: safe,
-      blocking_reasons: safe ? [] : ["fake block"],
-      trust: null,
-      crisis: null,
-      injection: null,
-      contradiction: null,
-    };
-  }
-}
+import { FakeSafetyClient } from "./helpers/fakeSafetyClient.js";
 
 function makeOrchestrator(safety = new FakeSafetyClient()) {
   const world = new World();
@@ -53,9 +31,12 @@ describe("Orchestrator: tier enforcement", () => {
   it("MEDIUM-tier actions auto-execute but stay flagged for clinician review", async () => {
     const { world, orchestrator } = makeOrchestrator();
     const patient = world.admitPatient("Test B");
-    world.recordEvent({ patientId: patient.id, eventType: "CHECK_IN_SUBMITTED", payload: { moodScore: 8, responded: true }, source: "patient", occurredAt: "2026-01-01T00:00:00.000Z" });
-    world.recordEvent({ patientId: patient.id, eventType: "CHECK_IN_SUBMITTED", payload: { moodScore: 5, responded: true }, source: "patient", occurredAt: "2026-01-02T00:00:00.000Z" });
-    const last = world.recordEvent({ patientId: patient.id, eventType: "CHECK_IN_SUBMITTED", payload: { moodScore: 3, responded: true }, source: "patient", occurredAt: "2026-01-03T00:00:00.000Z" });
+    // Recent (not stale -- Edge Case 3's freshness gate would otherwise
+    // block this MEDIUM action) but still chronologically ordered.
+    const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+    world.recordEvent({ patientId: patient.id, eventType: "CHECK_IN_SUBMITTED", payload: { moodScore: 8, responded: true }, source: "patient", occurredAt: daysAgo(3) });
+    world.recordEvent({ patientId: patient.id, eventType: "CHECK_IN_SUBMITTED", payload: { moodScore: 5, responded: true }, source: "patient", occurredAt: daysAgo(2) });
+    const last = world.recordEvent({ patientId: patient.id, eventType: "CHECK_IN_SUBMITTED", payload: { moodScore: 3, responded: true }, source: "patient", occurredAt: daysAgo(1) });
 
     const actions = await orchestrator.handleEvent(last);
     const flag = actions.find((a) => a.actionType === "FLAG_MOOD_PATTERN")!;
@@ -162,35 +143,36 @@ describe("Orchestrator: safety-service integration", () => {
 
 describe("Orchestrator: Edge Case 5 -- action invalidated by new information", () => {
   it("supersedes a lower-priority in-flight action when a crisis flag arrives", async () => {
-    const { world, orchestrator } = makeOrchestrator();
+    const { world, orchestrator, safety } = makeOrchestrator();
     const patient = world.admitPatient("Test I");
 
-    // Propose a HIGH-tier action first so it stays "proposed" (in-flight).
+    // First inbound message: the orchestrator's own independent
+    // crisis check (Edge Case 1) fires, raises a crisis flag, and
+    // the resulting HIGH-tier escalation stays "proposed" (in-flight).
+    safety.setCrisis({ is_crisis: true, probability: 0.6, reasoning: "fake: earlier flag" });
     const firstEvent = world.recordEvent({
       patientId: patient.id,
       eventType: "PATIENT_MESSAGE_RECEIVED",
-      payload: { text: "some earlier flagged message", crisisClassifierFlag: true },
+      payload: { text: "some earlier flagged message" },
       source: "patient",
     });
-    world.recordEvent({
-      patientId: patient.id,
-      eventType: "CRISIS_FLAG_RAISED",
-      payload: { severity: "low", reason: "earlier flag", raisedBy: "agent" },
-      source: "agent",
-    });
-    const [firstAction] = await orchestrator.handleEvent(firstEvent);
-    expect(firstAction!.status).toBe("proposed");
+    const firstBatch = await orchestrator.handleEvent(firstEvent);
+    const firstAction = firstBatch.find((a) => a.actionType === "ESCALATE_CRISIS")!;
+    expect(firstAction.status).toBe("proposed");
 
-    // A second, higher-severity crisis flag arrives.
-    const secondFlag = world.recordEvent({
+    // A second, higher-severity message arrives and is independently
+    // flagged too -- its resulting crisis flag should supersede the
+    // first, still in-flight, escalation.
+    safety.setCrisis({ is_crisis: true, probability: 0.95, reasoning: "fake: new explicit statement" });
+    const secondEvent = world.recordEvent({
       patientId: patient.id,
-      eventType: "CRISIS_FLAG_RAISED",
-      payload: { severity: "high", reason: "new explicit statement", raisedBy: "agent" },
-      source: "agent",
+      eventType: "PATIENT_MESSAGE_RECEIVED",
+      payload: { text: "new explicit statement" },
+      source: "patient",
     });
-    await orchestrator.handleEvent(secondFlag);
+    await orchestrator.handleEvent(secondEvent);
 
-    expect(firstAction!.status).toBe("superseded");
+    expect(firstAction.status).toBe("superseded");
   });
 });
 
@@ -215,7 +197,7 @@ describe("Orchestrator: overrides and self-correcting downgrade (Edge Case 8 + s
     const { world, orchestrator } = makeOrchestrator();
     const patient = world.admitPatient("Test K");
 
-    const baseMs = new Date("2026-01-01T00:00:00.000Z").getTime();
+    const baseMs = Date.now(); // fresh events throughout -- staleness (Edge Case 3) isn't what this test exercises
     const dayMs = 24 * 60 * 60 * 1000;
     let dayCounter = 0;
     function nextDayIso(): string {

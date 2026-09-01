@@ -9,7 +9,7 @@ AI agents act as coworkers to clinicians, not chatbots.
 See [`Sahayak_Spec.md`](./Sahayak_Spec.md) for the full specification, architectural
 decisions, and the 8 edge cases this system is built to handle explicitly.
 
-## Status: Phase 3 — Agent Orchestration + Action System
+## Status: Phase 4 — Edge Case Handling (all 8 edge cases)
 
 Implemented so far:
 
@@ -35,12 +35,16 @@ Implemented so far:
   - `actionSchema.ts` — the LOW/MEDIUM/HIGH allow-list for every action type; unclassified types default to HIGH; a hard blocklist (diagnose, adjust medication, autonomous discharge, contact emergency services) is never autonomous regardless of tier
   - `orchestrator.ts` — routes events → agents → tier resolution (including override-driven downgrades) → safety verification → action lifecycle; the only place allowed to decide whether an action actually executes
   - `checkInAgent.ts` (LOW), `patternFlagAgent.ts` (MEDIUM), `escalationAgent.ts` (HIGH) — three example agents
+  - `contradictionAgent.ts` (MEDIUM) — reacts to a new clinician note by comparing it against recent check-in data via the safety service; on CONTRADICT, always executes so the contradiction actually gets surfaced, never blended (Edge Case 4)
 - `core/src/actions/` — action lifecycle infrastructure
   - `actionStateMachine.ts` — `proposed → approved → executing → completed / superseded / cancelled`, with a `supersedeAllInFlightForPatient()` hook for Edge Case 5
   - `idempotency.ts` — idempotency-keyed execution that verifies current state before ever retrying (Edge Case 6)
   - `overrideMemory.ts` — permanent per-(patient, action type) override history (Edge Case 8) driving the self-correcting MEDIUM→HIGH downgrade rule after 2 consecutive overrides
-- `core/src/safety/safetyClient.ts` — typed client for the Python safety service's `/safety/verify-action`; fails closed if the service is unreachable
-- `core/tests/` — 59 passing tests total, including full action-lifecycle, tier-enforcement, safety-integration, supersession, and override/downgrade scenarios
+  - `triageQueue.ts` — fast confirm/dismiss queue for crisis flags, separate from the full approval queue, with per-pattern false-positive tracking for threshold recalibration (Edge Case 2)
+- `core/src/state-machine/staleness.ts` — Edge Case 3: facts default-expire after 30 days (or an explicit `validUntil`) unless explicitly reconfirmed (`FACT_RECONFIRMED` events); the orchestrator blocks MEDIUM/HIGH-tier execution on any stale source fact
+- `core/src/safety/` — `safetyClient.ts` (typed client for the Python safety service, fails closed if unreachable; also exposes standalone crisis/contradiction checks), `phiAccessControl.ts` + `auditLog.ts` (Edge Case 7: agent reasoning traces are AES-256-GCM encrypted at rest and gated by the SAME access-control check as the underlying patient record, with every read attempt — granted or denied — itself logged)
+- `Orchestrator.handleEvent()` now runs the crisis classifier independently on **every** inbound patient message unconditionally (Edge Case 1), not gated behind any agent's own judgment call
+- `core/tests/` — 74 passing tests total, including a dedicated `edgeCases.test.ts` proving Edge Cases 1, 2, 3, 4, and 7 (5, 6, and 8 are proven in `orchestrator.test.ts` / `idempotency.test.ts` from Phase 3) — all 8 edge cases from spec Section 3 now have a passing test
 
 ## Setup
 
@@ -63,7 +67,5 @@ python -m uvicorn app.main:app --reload    # run the API locally
 
 ## Not yet built
 
-Full edge-case handling (Phase 3 covers Edge Cases 5, 6, and 8; Edge Cases
-1-4 and 7 are still Phase 4 work), evaluation harness, clinician dashboard,
-and docs — see `Sahayak_Spec.md` Section 8
-for the remaining build phases.
+Evaluation harness, clinician dashboard, and docs — see `Sahayak_Spec.md`
+Section 8 for the remaining build phases.

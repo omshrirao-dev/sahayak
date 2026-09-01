@@ -18,10 +18,15 @@ export * from "./agents/orchestrator.js";
 export * from "./agents/checkInAgent.js";
 export * from "./agents/patternFlagAgent.js";
 export * from "./agents/escalationAgent.js";
+export * from "./agents/contradictionAgent.js";
 export * from "./actions/actionStateMachine.js";
 export * from "./actions/idempotency.js";
 export * from "./actions/overrideMemory.js";
+export * from "./actions/triageQueue.js";
+export * from "./state-machine/staleness.js";
 export * from "./safety/safetyClient.js";
+export * from "./safety/phiAccessControl.js";
+export * from "./safety/auditLog.js";
 
 export interface Patient {
   id: string;

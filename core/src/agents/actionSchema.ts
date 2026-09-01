@@ -60,6 +60,13 @@ const ACTION_REGISTRY: Record<string, ActionTypeDefinition> = {
     tier: "MEDIUM",
     description: "Suggest increasing/decreasing check-in frequency based on engagement pattern.",
   },
+  FLAG_DATA_CONTRADICTION: {
+    actionType: "FLAG_DATA_CONTRADICTION",
+    tier: "MEDIUM",
+    description:
+      "Surface a CONTRADICT verdict between two data sources (e.g. clinician note vs check-in data) " +
+      "to a human, verbatim and unresolved (Edge Case 4). Never averages or blends the sources.",
+  },
 
   // ---- HIGH: draft only, never executes without explicit approval. ----
   ESCALATE_CRISIS: {
