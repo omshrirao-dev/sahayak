@@ -1,0 +1,11 @@
+{
+  "id": "rapid_state_change",
+  "title": "Rapid state change -- crisis flag arriving mid-action",
+  "edgeCase": "Edge Case 5 -- action invalidated by new information",
+  "description": "A lower-severity crisis flag produces an in-flight (still 'proposed') HIGH-tier escalation. Before a clinician acts on it, a second, higher-severity message arrives for the same patient.",
+  "input": {
+    "firstPatientMessage": "Nobody would notice if I just disappeared for good.",
+    "secondPatientMessage": "I want to kill myself tonight."
+  },
+  "expectedBehavior": "The first escalation action must be superseded (not silently left 'proposed' alongside a second, contradicting draft) once the second, higher-priority crisis flag is raised -- proving actions are a real lifecycle, not an append-only log."
+}

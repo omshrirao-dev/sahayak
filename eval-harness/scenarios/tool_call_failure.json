@@ -1,0 +1,10 @@
+{
+  "id": "tool_call_failure",
+  "title": "Tool-call timeout / failure with retry",
+  "edgeCase": "Edge Case 6 -- tool call failure mid-workflow (idempotency)",
+  "description": "A LOW-tier action's external tool call fails on the first attempt (simulated timeout), then the workflow retries.",
+  "input": {
+    "failFirstAttempt": true
+  },
+  "expectedBehavior": "The system must verify current state before blindly retrying, and the underlying executor must never be invoked more than once for the same idempotency key -- no duplicate external action, even though the first attempt failed and a second attempt was made for the same triggering event."
+}

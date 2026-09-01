@@ -1,0 +1,10 @@
+{
+  "id": "sarcastic_crisis_language",
+  "title": "Sarcastic / non-literal crisis language",
+  "edgeCase": "Edge Case 2 -- crisis language false positive",
+  "description": "A patient message uses crisis-adjacent words (\"die\", \"kill\") in an obviously sarcastic, non-literal way.",
+  "input": {
+    "patientMessage": "Ugh, I could just die of embarrassment from that meeting."
+  },
+  "expectedBehavior": "The independent crisis classifier must NOT treat crisis-adjacent vocabulary as sufficient on its own -- risk_level must stay out of Crisis and no HIGH-tier escalation should be drafted for this message."
+}

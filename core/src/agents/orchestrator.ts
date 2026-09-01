@@ -93,14 +93,46 @@ export class Orchestrator {
 
   async handleEvent(event: BaseEvent): Promise<ActionInstance[]> {
     const created: ActionInstance[] = [];
+    let suppressAgentLoop = false;
 
-    // Edge Case 1 (crisis false negative): a dedicated, conservative
-    // classifier runs on EVERY inbound patient message, unconditionally
-    // -- not gated on any agent deciding to check. This is what makes
-    // it a redundant safety net rather than a single point of failure.
+    // Edge Case 1 (crisis false negative) + guardrail 4.2 (injection
+    // detection on any text entering agent context): both run on
+    // EVERY inbound patient message, unconditionally -- not gated on
+    // any agent deciding to check. Encoder-only classifiers can't
+    // themselves be hijacked by an injection attempt, so it's safe to
+    // run the crisis check regardless of the injection verdict; what
+    // the injection verdict controls is whether the message's raw
+    // text is allowed to reach the agent-evaluation loop below.
     if (event.eventType === "PATIENT_MESSAGE_RECEIVED") {
       const payload = event.payload as unknown as PatientMessageReceivedPayload;
-      const crisisResult = await this.safetyClient.checkCrisis(payload.text);
+      const [crisisResult, injectionResult] = await Promise.all([
+        this.safetyClient.checkCrisis(payload.text),
+        this.safetyClient.checkInjection(payload.text),
+      ]);
+
+      if (injectionResult.is_injection) {
+        const flagAction = this.actionRegistry.propose({
+          patientId: event.patientId,
+          actionType: "FLAG_INJECTION_ATTEMPT",
+          tier: "HIGH",
+          proposedBy: "system",
+          payload: {
+            patientId: event.patientId,
+            sourceEventId: event.id,
+            matchedPattern: injectionResult.matched_pattern,
+            reasoning: injectionResult.reasoning,
+          },
+          idempotencyKey: `${event.patientId}:FLAG_INJECTION_ATTEMPT:${event.id}`,
+        });
+        this.auditLog.writeReasoningTrace(
+          event.patientId,
+          "system",
+          `Injection attempt detected and withheld from agent context: ${injectionResult.reasoning}`,
+        );
+        created.push(flagAction);
+        suppressAgentLoop = true; // never let this message's raw text reach agent evaluation
+      }
+
       if (crisisResult.is_crisis) {
         const flagEvent = this.world.recordEvent({
           patientId: event.patientId,
@@ -146,11 +178,13 @@ export class Orchestrator {
       );
     }
 
-    for (const agent of this.agents) {
-      const drafts = await agent.evaluate(this.world, event.patientId, event);
-      for (const draft of drafts) {
-        const action = await this.proposeAndRoute(agent.name, event.patientId, draft, event.id);
-        if (action) created.push(action);
+    if (!suppressAgentLoop) {
+      for (const agent of this.agents) {
+        const drafts = await agent.evaluate(this.world, event.patientId, event);
+        for (const draft of drafts) {
+          const action = await this.proposeAndRoute(agent.name, event.patientId, draft, event.id);
+          if (action) created.push(action);
+        }
       }
     }
     return created;

@@ -9,7 +9,7 @@ AI agents act as coworkers to clinicians, not chatbots.
 See [`Sahayak_Spec.md`](./Sahayak_Spec.md) for the full specification, architectural
 decisions, and the 8 edge cases this system is built to handle explicitly.
 
-## Status: Phase 4 — Edge Case Handling (all 8 edge cases)
+## Status: Phase 5 — Evaluation Harness
 
 Implemented so far:
 
@@ -44,7 +44,11 @@ Implemented so far:
 - `core/src/state-machine/staleness.ts` — Edge Case 3: facts default-expire after 30 days (or an explicit `validUntil`) unless explicitly reconfirmed (`FACT_RECONFIRMED` events); the orchestrator blocks MEDIUM/HIGH-tier execution on any stale source fact
 - `core/src/safety/` — `safetyClient.ts` (typed client for the Python safety service, fails closed if unreachable; also exposes standalone crisis/contradiction checks), `phiAccessControl.ts` + `auditLog.ts` (Edge Case 7: agent reasoning traces are AES-256-GCM encrypted at rest and gated by the SAME access-control check as the underlying patient record, with every read attempt — granted or denied — itself logged)
 - `Orchestrator.handleEvent()` now runs the crisis classifier independently on **every** inbound patient message unconditionally (Edge Case 1), not gated behind any agent's own judgment call
-- `core/tests/` — 74 passing tests total, including a dedicated `edgeCases.test.ts` proving Edge Cases 1, 2, 3, 4, and 7 (5, 6, and 8 are proven in `orchestrator.test.ts` / `idempotency.test.ts` from Phase 3) — all 8 edge cases from spec Section 3 now have a passing test
+- `core/tests/` — 75 passing tests total, including a dedicated `edgeCases.test.ts` proving Edge Cases 1, 2, 3, 4, and 7 (5, 6, and 8 are proven in `orchestrator.test.ts` / `idempotency.test.ts` from Phase 3) — all 8 edge cases from spec Section 3 now have a passing test
+- `eval-harness/` — mandatory pre-ship evaluation suite (spec 4.3), run against the **live system**: a real `Orchestrator` wired to the real, running Python safety service over HTTP, not mocks
+  - `scenarios/` — the 7 required scenarios (sarcastic crisis language, subtle genuine crisis, contradictory sources, stale-memory usage, injection attempt, tool-call failure, rapid state change), each a JSON file with its input and expected system behavior
+  - `run_eval.ts` — runs every scenario, reports PASS/FAIL with reasoning, exits non-zero on any failure
+  - Currently **7/7 passing**. Building this harness against the live service (rather than mocks) surfaced two real gaps, documented in `eval-harness/README.md`: `contradictionAgent`'s check-in summary needed trend wording (not just raw numbers) for the lexicon-assisted contradiction classifier to pick up the signal, and prompt injection detection (guardrail 4.2) wasn't actually wired to run independently on every inbound message until this phase
 
 ## Setup
 
@@ -67,5 +71,5 @@ python -m uvicorn app.main:app --reload    # run the API locally
 
 ## Not yet built
 
-Evaluation harness, clinician dashboard, and docs — see `Sahayak_Spec.md`
-Section 8 for the remaining build phases.
+Clinician dashboard and docs — see `Sahayak_Spec.md` Section 8 for the
+remaining build phases.

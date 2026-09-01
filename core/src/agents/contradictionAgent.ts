@@ -5,14 +5,40 @@ import type { SafetyClient } from "../safety/safetyClient.js";
 
 const RECENT_CHECK_IN_COUNT = 3;
 
+const LOW_MOOD_SCORE = 4;
+
+/**
+ * Describes the trend in words ("declining"/"improving"/"stable"),
+ * not just the raw numbers. The contradiction detector is a lexicon-
+ * assisted classifier (see safety-service/app/contradiction_detector.py)
+ * that reads for polarity cue words like "declining" or "stable" --
+ * a bare number list ("scores are 3, 2, 3") carries none of that
+ * signal and under-triggers CONTRADICT even when the trend plainly
+ * disagrees with a clinician note. The numbers stay in the text
+ * verbatim alongside the description; this adds a factual descriptor
+ * computed from the check-in data itself, it doesn't blend it with
+ * the clinician's note.
+ */
 function summarizeRecentCheckIns(world: World, patientId: string): { text: string; eventIds: string[] } {
   const checkIns = world.store
     .getByPatientAndType(patientId, "CHECK_IN_SUBMITTED")
     .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
     .slice(0, RECENT_CHECK_IN_COUNT);
-  const scores = checkIns.map((e) => (e.payload as unknown as CheckInSubmittedPayload).moodScore);
+  const chronological = [...checkIns].reverse();
+  const scores = chronological.map((e) => (e.payload as unknown as CheckInSubmittedPayload).moodScore);
+
+  let trend = "stable";
+  if (scores.length >= 2) {
+    if (scores[scores.length - 1]! < scores[0]!) trend = "declining";
+    else if (scores[scores.length - 1]! > scores[0]!) trend = "improving";
+  }
+  const lowNote = scores.length > 0 && scores.every((s) => s <= LOW_MOOD_SCORE) ? " and trending low" : "";
+
   return {
-    text: `Check-in data: most recent mood scores are ${scores.join(", ") || "none recorded"}.`,
+    text:
+      scores.length > 0
+        ? `Check-in data: mood scores are ${trend}${lowNote} (most recent: ${scores.join(", ")}).`
+        : "Check-in data: none recorded.",
     eventIds: checkIns.map((e) => e.id),
   };
 }

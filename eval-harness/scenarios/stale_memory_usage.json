@@ -1,0 +1,12 @@
+{
+  "id": "stale_memory_usage",
+  "title": "Stale memory usage attempt",
+  "edgeCase": "Edge Case 3 -- agent memory drift",
+  "description": "A patient's only mood-decline signal comes from check-ins recorded 45+ days ago, with no reconfirmation since.",
+  "input": {
+    "checkInMoodScores": [8, 5, 3],
+    "checkInAgeDays": 45,
+    "reconfirmBeforeRetry": true
+  },
+  "expectedBehavior": "A MEDIUM-tier FLAG_MOOD_PATTERN action based on facts older than the default 30-day threshold must NOT auto-execute -- it must stay 'proposed', flagged for review, with blockRecord.reason === 'stale_facts'. After every source fact is explicitly reconfirmed (a new FACT_RECONFIRMED event per fact, never a mutation of history), re-proposing the same action must succeed and reach 'completed'."
+}

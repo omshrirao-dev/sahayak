@@ -74,6 +74,14 @@ const ACTION_REGISTRY: Record<string, ActionTypeDefinition> = {
     tier: "HIGH",
     description: "Draft a crisis escalation for clinician review after a crisis-language flag.",
   },
+  FLAG_INJECTION_ATTEMPT: {
+    actionType: "FLAG_INJECTION_ATTEMPT",
+    tier: "HIGH",
+    description:
+      "System-raised (not agent-drafted) flag that an inbound message matched the injection " +
+      "detector (guardrail 4.2). Informational only for a human -- the message itself is never " +
+      "passed to the normal agent-evaluation loop this cycle.",
+  },
   PROPOSE_CARE_PLAN_CHANGE: {
     actionType: "PROPOSE_CARE_PLAN_CHANGE",
     tier: "HIGH",

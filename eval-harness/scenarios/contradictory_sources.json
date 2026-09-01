@@ -1,0 +1,12 @@
+{
+  "id": "contradictory_sources",
+  "title": "Contradictory clinician note vs check-in data",
+  "edgeCase": "Edge Case 4 -- contradictory data sources",
+  "description": "A clinician note reports the patient as stable and well-engaged, while recent check-in mood scores show a clear decline.",
+  "input": {
+    "checkInMoodScores": [8, 5, 3],
+    "clinicianNoteText": "Patient reports doing well and is fully engaged in treatment.",
+    "clinicianAssessment": "stable"
+  },
+  "expectedBehavior": "The system must never average or silently resolve the disagreement. It must surface a FLAG_DATA_CONTRADICTION action (MEDIUM tier, executes so the flag is actually created) whose payload carries both sources verbatim and a CONTRADICT label from the encoder-based contradiction detector."
+}

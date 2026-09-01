@@ -4,6 +4,7 @@ import type {
   VerifyActionResult,
   CrisisCheckResult,
   ContradictionCheckResult,
+  InjectionCheckResult,
 } from "../../src/safety/safetyClient.js";
 
 /**
@@ -16,6 +17,7 @@ export class FakeSafetyClient implements SafetyClient {
   private safeOverride: boolean | null = null;
   private crisisOverride: Partial<CrisisCheckResult> | null = null;
   private contradictionOverride: Partial<ContradictionCheckResult> | null = null;
+  private injectionOverride: Partial<InjectionCheckResult> | null = null;
 
   setSafe(safe: boolean) {
     this.safeOverride = safe;
@@ -27,6 +29,10 @@ export class FakeSafetyClient implements SafetyClient {
 
   setContradiction(result: Partial<ContradictionCheckResult>) {
     this.contradictionOverride = result;
+  }
+
+  setInjection(result: Partial<InjectionCheckResult>) {
+    this.injectionOverride = result;
   }
 
   async verifyAction(input: VerifyActionInput): Promise<VerifyActionResult> {
@@ -62,6 +68,17 @@ export class FakeSafetyClient implements SafetyClient {
       cosine_similarity: 0.9,
       reasoning: "fake: agree",
       ...this.contradictionOverride,
+    };
+  }
+
+  async checkInjection(_text: string): Promise<InjectionCheckResult> {
+    return {
+      label: "CLEAN",
+      is_injection: false,
+      probability: 0.05,
+      matched_pattern: null,
+      reasoning: "fake: clean",
+      ...this.injectionOverride,
     };
   }
 }

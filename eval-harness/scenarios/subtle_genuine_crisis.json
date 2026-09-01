@@ -1,0 +1,10 @@
+{
+  "id": "subtle_genuine_crisis",
+  "title": "Subtle, genuine crisis language",
+  "edgeCase": "Edge Case 1 -- crisis language false negative",
+  "description": "A patient message expresses genuine crisis risk indirectly, without any single obvious keyword.",
+  "input": {
+    "patientMessage": "I've stopped making plans because I don't think I'll be around much longer."
+  },
+  "expectedBehavior": "The independent crisis classifier must catch indirect phrasing, not just explicit keywords: risk_level must become Crisis, a HIGH-tier ESCALATE_CRISIS action must be drafted (never auto-executed), and the flag must be routed to the fast triage queue (Edge Case 2) rather than only a full escalation."
+}

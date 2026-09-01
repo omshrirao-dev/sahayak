@@ -79,6 +79,15 @@ export interface SafetyClient {
    * agent, which must always execute in order to surface what it found.
    */
   checkContradiction(sourceA: string, sourceB: string): Promise<ContradictionCheckResult>;
+  /**
+   * Standalone injection check (POST /safety/injection). Guardrail
+   * 4.2 requires prompt injection detection on ANY text entering
+   * agent context -- the orchestrator runs this independently on
+   * every inbound patient message, same pattern as checkCrisis(),
+   * rather than only checking injection incidentally when some other
+   * flow happens to attach inbound_patient_text to verifyAction.
+   */
+  checkInjection(text: string): Promise<InjectionCheckResult>;
 }
 
 export class SafetyServiceUnavailableError extends Error {
@@ -128,5 +137,9 @@ export class HttpSafetyClient implements SafetyClient {
       source_a: sourceA,
       source_b: sourceB,
     });
+  }
+
+  checkInjection(text: string): Promise<InjectionCheckResult> {
+    return this.post<InjectionCheckResult>("/safety/injection", { text });
   }
 }
