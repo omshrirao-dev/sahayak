@@ -1,0 +1,22 @@
+{
+  "name": "sahayak-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Sahayak core backend - Node/TypeScript event-driven care coordination engine",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "seed": "tsx ../seed-data/generate_synthetic_patients.ts"
+  },
+  "dependencies": {
+    "xstate": "^5.18.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "tsx": "^4.16.2",
+    "vitest": "^2.0.5",
+    "@types/node": "^20.14.15"
+  }
+}

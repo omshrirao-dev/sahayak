@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.log
+.env
+.env.local
+seed-data/output/
+__pycache__/
+*.pyc
+.venv/
+venv/
