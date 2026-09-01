@@ -9,7 +9,7 @@ AI agents act as coworkers to clinicians, not chatbots.
 See [`Sahayak_Spec.md`](./Sahayak_Spec.md) for the full specification, architectural
 decisions, and the 8 edge cases this system is built to handle explicitly.
 
-## Status: Phase 1 — Foundation + World-State Model
+## Status: Phase 2 — Python Safety Service
 
 Implemented so far:
 
@@ -22,21 +22,37 @@ Implemented so far:
   - `src/db/schema.sql` — Postgres/Supabase schema (patients, immutable events, care_stage history)
 - `seed-data/generate_synthetic_patients.ts` — generates 22 clearly-synthetic patient journeys covering all three dimensions, including early previews of Edge Cases 3 and 4
 - `core/tests/` — 27 passing tests covering state transitions, event-store immutability, and risk/engagement computation from varied event sequences
+- `safety-service/` — Python/FastAPI encoder-based safety microservice
+  - `app/embedder.py` — TF-IDF+SVD embedding by default; optional mDeBERTa-v3 backend behind `SAHAYAK_USE_MDEBERTA=1`, with automatic fallback if `torch`/`transformers` aren't available
+  - `app/crisis_classifier.py` — conservative CRISIS/NOT_CRISIS detector (Edge Cases 1 & 2): hard-coded keyword patterns always win, ML threshold calibrated to favor recall
+  - `app/trust_classifier.py` — 4-class VERIFIED/UNCERTAIN/SUSPICIOUS/UNRELIABLE verification of agent-drafted text
+  - `app/contradiction_detector.py` — 4-class AGREE/PARTIAL/CONTRADICT/INSUFFICIENT detector over pairs of data sources (Edge Case 4), feature-based on embedding similarity + polarity/hedge lexicon cues
+  - `app/injection_detector.py` — INJECTION/CLEAN detector for text entering agent context
+  - `app/training_data.py` — 260 synthetic labeled examples across all four classifiers
+  - `app/main.py` — FastAPI app; `POST /safety/verify-action` is the combined endpoint the Node core calls per proposed action
+  - `tests/` — 28 passing tests, including the sarcasm/subtle-crisis/injection/contradiction edge cases from spec Section 4.3
 
 ## Setup
 
-Requires Node.js 20+.
+Requires Node.js 20+ and Python 3.11+.
 
 ```bash
+# Core backend
 cd core
 npm install
 npm run build   # compile TypeScript
 npm test        # run the vitest suite
 npm run seed    # generate seed-data/output/patients.json
+
+# Safety service
+cd ../safety-service
+pip install -r requirements.txt
+pytest -v                                  # run the test suite
+python -m uvicorn app.main:app --reload    # run the API locally
 ```
 
 ## Not yet built
 
-Python safety service, agent orchestration/action system, full edge-case
-handling, evaluation harness, clinician dashboard, and docs — see
-`Sahayak_Spec.md` Section 8 for the remaining build phases.
+Agent orchestration/action system, full edge-case handling, evaluation
+harness, clinician dashboard, and docs — see `Sahayak_Spec.md` Section 8
+for the remaining build phases.
