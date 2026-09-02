@@ -8,15 +8,22 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "seed": "tsx ../seed-data/generate_synthetic_patients.ts"
+    "seed": "tsx ../seed-data/generate_synthetic_patients.ts",
+    "dashboard": "tsx src/api/server.ts"
   },
   "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "ws": "^8.21.3",
     "xstate": "^5.18.1"
   },
   "devDependencies": {
-    "typescript": "^5.5.4",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^20.14.15",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.16.2",
-    "vitest": "^2.0.5",
-    "@types/node": "^20.14.15"
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
   }
 }

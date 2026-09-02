@@ -107,4 +107,9 @@ export class OverrideMemory {
   getOverrideHistory(patientId: string, actionType: string): OverrideRecord[] {
     return this.records.filter((r) => r.patientId === patientId && r.actionType === actionType);
   }
+
+  /** Every override recorded for a patient, across all action types -- for the clinician timeline view. */
+  getAllOverridesForPatient(patientId: string): OverrideRecord[] {
+    return this.records.filter((r) => r.patientId === patientId);
+  }
 }

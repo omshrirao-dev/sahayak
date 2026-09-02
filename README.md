@@ -9,7 +9,7 @@ AI agents act as coworkers to clinicians, not chatbots.
 See [`Sahayak_Spec.md`](./Sahayak_Spec.md) for the full specification, architectural
 decisions, and the 8 edge cases this system is built to handle explicitly.
 
-## Status: Phase 5 — Evaluation Harness
+## Status: Phase 6 — Clinician Dashboard
 
 Implemented so far:
 
@@ -49,6 +49,18 @@ Implemented so far:
   - `scenarios/` — the 7 required scenarios (sarcastic crisis language, subtle genuine crisis, contradictory sources, stale-memory usage, injection attempt, tool-call failure, rapid state change), each a JSON file with its input and expected system behavior
   - `run_eval.ts` — runs every scenario, reports PASS/FAIL with reasoning, exits non-zero on any failure
   - Currently **7/7 passing**. Building this harness against the live service (rather than mocks) surfaced two real gaps, documented in `eval-harness/README.md`: `contradictionAgent`'s check-in summary needed trend wording (not just raw numbers) for the lexicon-assisted contradiction classifier to pick up the signal, and prompt injection detection (guardrail 4.2) wasn't actually wired to run independently on every inbound message until this phase
+- `core/src/api/` — the dashboard's REST + WebSocket API server
+  - `dashboard.ts` — thin HTTP wrapper (Express) around the already-tested `Orchestrator`/`World` methods: patient list/timeline, approval queue, fast triage queue, reasoning-trace reads, a demo "simulate inbound message" endpoint, and a WebSocket refresh channel that stands in locally for Supabase Realtime subscriptions (same "simulate the managed service locally" pattern as `eventBus.ts` standing in for EventBridge)
+  - `seedDemoData.ts` — seeds ~8 synthetic patients **through the real orchestrator** (not just World state) on server boot, so the dashboard has genuine actions/queue content to show
+  - `server.ts` — entry point; requires the safety service reachable at boot (fails closed, same posture as everywhere else in the system)
+  - `core/tests/dashboard.test.ts` — 8 integration tests hitting the real Express app over HTTP (hermetic, `FakeSafetyClient`-backed) proving the API reflects real backend state accurately
+- `frontend/` — React + TypeScript + Tailwind clinician dashboard (Vite)
+  - **Patients** — live list with all three world-state dimensions
+  - **Patient timeline** — full event/action/override history, plus reasoning traces (encrypted, access-controlled, revealed on click) and a box to simulate an inbound patient message through the live orchestrator
+  - **Approval Queue** — HIGH-tier drafted actions, plus anything blocked from auto-executing (stale facts / safety verdict); approve or reject
+  - **Fast Triage** — crisis flags awaiting a quick confirm/dismiss, separate from the full approval queue (Edge Case 2)
+  - Verified end-to-end with a headless-browser pass (navigation, all three tabs, clicking Approve and watching the queue count change live, revealing an encrypted reasoning trace) — no console errors
+- `core/tests/` — **83 passing tests total** (75 from Phases 1-5 + 8 new dashboard integration tests)
 
 ## Setup
 
@@ -69,7 +81,26 @@ pytest -v                                  # run the test suite
 python -m uvicorn app.main:app --reload    # run the API locally
 ```
 
+## Running the full dashboard demo
+
+Three services, in order:
+
+```bash
+# 1. Safety service (required -- the dashboard API fails closed without it)
+cd safety-service
+python -m uvicorn app.main:app
+
+# 2. Dashboard API (seeds demo patients through the real orchestrator on boot)
+cd core
+npm run dashboard   # http://localhost:4000
+
+# 3. Frontend
+cd frontend
+npm install          # first time only
+npm run dev           # http://localhost:5173
+```
+
 ## Not yet built
 
-Clinician dashboard and docs — see `Sahayak_Spec.md` Section 8 for the
-remaining build phases.
+Docs (`docs/ARCHITECTURE.md`, `docs/SAFETY.md`, `docs/DECISIONS.md`,
+`docs/API.md`) — see `Sahayak_Spec.md` Section 8, Phase 7.

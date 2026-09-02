@@ -31,9 +31,18 @@ export const escalationAgent: Agent = {
     return [
       {
         actionType: "ESCALATE_CRISIS",
-        payload: { patientId, severity: payload.severity, sourceEventId: triggerEvent.id },
+        // The classifier's raw reasoning (payload.reason) is kept
+        // here, in the audit-facing `reason` field below, and in the
+        // action payload -- but deliberately NOT in draftedText.
+        // draftedText goes through the trust classifier as
+        // clinician-facing content (spec 4.1: agents never surface
+        // free-form/raw-internals text); a string like "ML
+        // crisis-language probability 0.681 >= threshold 0.5" reads
+        // as leaked system internals, not a clinical summary, and
+        // the trust classifier correctly flags exactly that pattern.
+        payload: { patientId, severity: payload.severity, sourceEventId: triggerEvent.id, classifierReasoning: payload.reason },
         reason: `Crisis flag raised (${payload.severity}): ${payload.reason}`,
-        draftedText: `Crisis escalation drafted for clinician review. Severity: ${payload.severity}. Reason: ${payload.reason}`,
+        draftedText: `Crisis escalation drafted for clinician review. Severity: ${payload.severity}. See the linked event for full detail.`,
       },
     ];
   },
